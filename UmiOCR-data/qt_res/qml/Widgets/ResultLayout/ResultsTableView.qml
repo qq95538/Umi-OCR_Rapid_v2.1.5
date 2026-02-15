@@ -9,6 +9,11 @@ import "../"
 Item {
     ListModel { id: resultsModel } // OCR结果模型
 
+    // ========================= 【搜索功能新增属性】 =========================
+    property var allResults: []           // 存储所有结果的备份，用于搜索过滤
+    property bool isFiltering: false    // 是否处于过滤状态
+    property string searchText_: ""      // 搜索词
+
     // ========================= 【对外接口】 =========================
 
     property alias ctrlBar: ctrlBar // 控制栏的引用
@@ -59,8 +64,9 @@ Item {
                 res.title += " | "+qsTr("置信度 %1").arg(t2)
             }
         }
-        // 添加到列表模型
-        resultsModel.append({
+        
+        // 创建结果对象
+        var resultObj = {
             "status__": status_,
             "title": res.title,
             "datetime": dateTimeString,
@@ -70,23 +76,121 @@ Item {
             "selectR_": -1,
             "selectUpdate_": 0,
             "source": JSON.stringify(res), // 保存原始数据
-        })
+        }
+        
+        // 添加到列表模型
+        resultsModel.append(resultObj)
+        
+        // 同时添加到备份数组（用于搜索过滤）
+        allResults.push(resultObj)
+        
         // 自动滚动
         if(autoToBottom) {
             tableView.toBottom()
         }
+        
         return resText
     }
 
     // 搜索一个结果。可传入 title 或 timestamp
     function getResult(title="", timestamp=-1) {
-        for (let i = 0, l=resultsModel.count; i < l; i++) {
-            let item = resultsModel.get(i);
+        // 优先从allResults搜索，确保过滤状态下也能正确查找
+        for (let i = 0, l=allResults.length; i < l; i++) {
+            let item = allResults[i];
             if (item.title === title || item.timestamp === timestamp) {
                 return item
             }
         }
         return undefined
+    }
+    
+    // 搜索功能：过滤结果
+    function filterResults(searchText) {
+        if(!searchText || searchText.trim() === "") {
+            showAllResults()
+            return
+        }
+        // 分割搜索词（按空格分隔）
+        var keywords = searchText.trim().split(/\s+/)
+        
+        // 清空当前显示
+        resultsModel.clear()
+        
+        // 遍历所有结果，筛选匹配的记录
+        var matchCount = 0
+        for(var i = 0; i < allResults.length; i++) {
+            var item = allResults[i]
+            var resText = (item.resText || "").toLowerCase()
+            var title = (item.title || "").toLowerCase()
+            
+            // 检查是否包含所有关键词（AND逻辑）
+            var allMatch = true
+            for(var j = 0; j < keywords.length; j++) {
+                var keyword = keywords[j].toLowerCase()
+                if(!resText.includes(keyword) && !title.includes(keyword)) {
+                    allMatch = false
+                    break
+                }
+            }
+            
+            if(allMatch) {
+                resultsModel.append(item)
+                matchCount++
+            }
+        }
+        
+        isFiltering = true
+        qmlapp.popup.simple(qsTr("搜索完成，找到%1条结果").arg(matchCount), "")
+    }
+    
+    // 显示全部结果
+    function showAllResults() {
+        if(!isFiltering && allResults.length === resultsModel.count) return
+        
+        // 清空当前显示
+        resultsModel.clear()
+        
+        // 恢复显示所有记录
+        for(var i = 0; i < allResults.length; i++) {
+            resultsModel.append(allResults[i])
+        }
+        
+        isFiltering = false
+        qmlapp.popup.simple(qsTr("已显示全部记录，共%1条").arg(allResults.length), "")
+    }
+    
+    // 复制搜索结果到剪贴板
+    function copySearchResults() {
+        var copyText = ""
+        var count = resultsModel.count
+        
+        for(var i = 0; i < count; i++) {
+            var item = resultsModel.get(i)
+            if(item.resText) {
+                copyText += item.resText
+                if(i < count - 1) copyText += "\n"
+            }
+        }
+        
+        if(copyText && copyText.length > 0) {
+            qmlapp.utilsConnector.copyText(copyText)
+            qmlapp.popup.simple(qsTr("记录：复制搜索结果%1字").arg(copyText.length), "")
+        }
+        else {
+            qmlapp.popup.simple(qsTr("无搜索结果可复制"), "")
+        }
+    }
+    
+    // 获取状态文本
+    function getStatusText() {
+        var total = allResults.length
+        var current = resultsModel.count
+        if(isFiltering) {
+            return qsTr("当前显示过滤结果，共%1条 / 总共%2条").arg(current).arg(total)
+        }
+        else {
+            return qsTr("当前显示全部记录，共%1条").arg(total)
+        }
     }
     
     // ========================= 【布局】 =========================
@@ -101,6 +205,7 @@ Item {
         id: tableView
         anchors.fill: parent
         anchors.rightMargin: scrollBarWidth
+        anchors.topMargin: ctrlBar.height + size_.smallSpacing // 为控制栏预留空间
         rowSpacing: size_.smallSpacing // 行间隔
         contentWidth: parent.width // 内容宽度
         model: resultsModel // 模型
@@ -193,6 +298,7 @@ Item {
         z: 10
         anchors.fill: parent
         anchors.rightMargin: scrollBarWidth
+        anchors.topMargin: ctrlBar.height + size_.smallSpacing // 为控制栏预留空间
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         property var tableChi: tableView.children[0].children
         hoverEnabled: true
@@ -366,13 +472,17 @@ Item {
             if(li < 0 || ri < 0) return
             const l = ri-li+1
             resultsModel.remove(li, l)
+            // 同步从allResults中删除
+            allResults.splice(li, l)
             initIndexes() // 重设 Index
             qmlapp.popup.simple(qsTr("删除%1条记录").arg(l), "")
         }
         // 删除全部
         function selectAllDel() {
             resultsModel.clear()
+            allResults = []  // 清空备份数组
             initIndexes() // 重设 Index
+            isFiltering = false
             qmlapp.popup.simple(qsTr("清空记录"), "")
         }
         // 按下
@@ -393,7 +503,7 @@ Item {
             else if(info.where >= 0) { // 文本区域
                 selectUpdateAdd()
                 // 移除现有的所有选区
-                for (let i = 0, l=resultsModel.count; i < l; i++) {
+                for (let i = 0, l = resultsModel.count; i < l; i++) {
                     let element = resultsModel.get(i)
                     element.selectL_ = -1
                     element.selectR_ = -1
@@ -463,68 +573,130 @@ Item {
     ScrollBar {
         id:scrollBar
         anchors.top: parent.top
+        anchors.topMargin: ctrlBar.height + size_.smallSpacing
         anchors.bottom: parent.bottom
         anchors.right: parent.right
         width: scrollBarWidth 
     }
 
-    // ==================== 【外置控制栏】 ====================
+    // ==================== 【外置控制栏 - 包含搜索功能】 ====================
     Item {
         id: ctrlBar
-        height: size_.line*1.5
+        height: size_.line * 3.5  // 增加高度以容纳搜索栏
         anchors.left: parent.left
         anchors.right: parent.right
+        anchors.top: parent.top
 
+        // 搜索栏（第一行）
         Row {
+            id: searchRow
             anchors.top: parent.top
-            anchors.bottom: parent.bottom
+            anchors.left: parent.left
             anchors.right: parent.right
-
-            CheckButton {
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                text_: qsTr("滚动")
-                toolTip: qsTr("自动滚动到底部")
-                textColor_: autoToBottom ? theme.textColor : theme.subTextColor
-                checked: autoToBottom
-                enabledAnime: true
-                onCheckedChanged: {
-                    autoToBottom = checked
-                    if(checked) {
-                        tableView.toBottom()
-                    }
-                    else {
-                        bottomTimer.running = false
-                    }
+            height: size_.line * 1.5
+            spacing: size_.smallSpacing
+            
+            // 搜索词标签
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("搜索词:")
+                color: theme.textColor
+                font.pointSize: theme.smallFontSize
+            }
+            
+            // 搜索文本框
+            TextField {
+                id: searchTextField
+                anchors.verticalCenter: parent.verticalCenter
+                width: 200
+                placeholderText: qsTr("输入搜索词，多个词用空格分隔")
+                text: searchText_
+                onTextChanged: {
+                    searchText_ = text
+                }
+                // 回车触发搜索
+                onAccepted: {
+                    filterResults(searchText_)
                 }
             }
-            // 菜单
-            IconButton {
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                width: height
-                icon_: "menu"
-                color: theme.textColor
-                onClicked: selectMenu.popup()
-                toolTip: qsTr("右键菜单")
+            
+            // 仅显示搜索结果按钮
+            Button {
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("仅显示搜索结果")
+                onClicked: {
+                    filterResults(searchText_)
+                }
+            }
+            
+            // 显示全部按钮
+            Button {
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("显示全部")
+                enabled: isFiltering  // 仅在过滤状态时启用
+                onClicked: {
+                    showAllResults()
+                }
+            }
+            
+            // 复制搜索结果按钮
+            Button {
+                anchors.verticalCenter: parent.verticalCenter
+                text: qsTr("复制搜索结果")
+                enabled: isFiltering  // 仅在过滤状态时启用
+                onClicked: {
+                    copySearchResults()
+                }
+            }
+            
+            // 右侧功能按钮
+            Row {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: size_.smallSpacing
+                
+                CheckButton {
+                    text_: qsTr("滚动")
+                    toolTip: qsTr("自动滚动到底部")
+                    textColor_: autoToBottom ? theme.textColor : theme.subTextColor
+                    checked: autoToBottom
+                    enabledAnime: true
+                    onCheckedChanged: {
+                        autoToBottom = checked
+                        if(checked) {
+                            tableView.toBottom()
+                        }
+                        else {
+                            bottomTimer.running = false
+                        }
+                    }
+                }
+                // 菜单
+                IconButton {
+                    width: height
+                    icon_: "menu"
+                    color: theme.textColor
+                    onClicked: selectMenu.popup()
+                    toolTip: qsTr("右键菜单")
+                }
+            }
+        }
+        
+        // 状态提示（第二行）
+        Row {
+            anchors.top: searchRow.bottom
+            anchors.topMargin: size_.tinySpacing
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: size_.line
+            
+            Text {
+                id: statusText
+                anchors.verticalCenter: parent.verticalCenter
+                text: getStatusText()
+                color: isFiltering ? theme.mainColor : theme.subTextColor  // 过滤状态时高亮显示
+                font.pointSize: theme.smallFontSize
             }
         }
     }
-
-    // 测试
-    // Button_ {
-    //     anchors.top: parent.top
-    //     anchors.left: parent.left
-    //     z:100
-    //     bgColor_: "red"
-    //     text_: "Test"
-    //     onClicked: {
-    //         let t = "\n"
-    //         for (let i = 0, l=resultsModel.count; i < l; i++) {
-    //             let item = resultsModel.get(i);
-    //             t += "\n "+i+" "+item.resText
-    //         }
-    //         console.log("resultsModel: ", resultsModel.count, t)
-    //     }
-    // }
 }

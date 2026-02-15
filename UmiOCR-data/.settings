@@ -35,7 +35,7 @@ window.barIsLock=false
 window.closeWin2Hide=true
 window.hideTrayIcon=false
 window.simpleNotificationType=inside
-window.geometry="548,172,800,500"
+window.geometry="345,162,800,500"
 window.messageMemory=@Variant(\0\0\0\x7f\0\0\0\tQJSValue\0\0\0\0\0\0\0\0\t\0\0\0\0)
 window.doubleLayout=@Variant(\0\0\0\x7f\0\0\0\tQJSValue\0\0\0\0\0\0\0\0\b\0\0\0\0)
 screenshot.hideWindow=true
@@ -50,7 +50,7 @@ ocr.win7_x64_RapidOCR-json.numThread=16
 [TabPageManager]
 openPageList=@Variant(\0\0\0\t\0\0\0\x1\0\0\0\n\0\0\0*\0\x42\0\x61\0t\0\x63\0h\0\x44\0O\0\x43\0/\0\x42\0\x61\0t\0\x63\0h\0\x44\0O\0\x43\0.\0q\0m\0l)
 showPageIndex=0
-refresh=true
+refresh=false
 
 [BatchPDF]
 configs_advanced=false
